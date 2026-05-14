@@ -27,6 +27,8 @@ const LOG_MESSAGE_SNAPSHOT_EVERY = Number(process.env.LA_MESSAGE_SNAPSHOT_EVERY 
 const LIVE_MESSAGE_LOG = String(process.env.LA_LIVE_MESSAGE_LOG || 'false').toLowerCase() === 'true';
 const PROFILE_POST_XP = Number(process.env.LA_PROFILE_POST_XP || 10);
 const PROFILE_WEEKLY_WINNER_XP = Number(process.env.LA_PROFILE_WEEKLY_WINNER_XP || 75);
+const PANEL_REFRESH_MINUTES = Number(process.env.LA_PANEL_REFRESH_MINUTES || 5);
+const PANEL_REFRESH_INTERVAL_MS = PANEL_REFRESH_MINUTES > 0 ? PANEL_REFRESH_MINUTES * 60 * 1000 : 0;
 
 const LANGUAGES = [
     { code: 'en', label: 'English', emoji: '🇬🇧' },
@@ -136,6 +138,7 @@ const CATEGORIES = [
     {
         key: 'important',
         name: '〢 𝐈𝐌𝐏𝐎𝐑𝐓𝐀𝐍𝐓',
+        private: 'locked',
         channels: [
             { key: 'rules', name: '📜・rules', topic: 'Rules and community guidelines for LA VELOO.' },
             { key: 'support', name: '💖・support', topic: 'Support panel and help requests.' },
@@ -147,12 +150,13 @@ const CATEGORIES = [
             { key: 'announcements', name: '📢・announcements', topic: 'Official announcements.' },
             { key: 'updates', name: '📦・updates', topic: 'Server, bot, and tournament updates.' },
             { key: 'botLog', name: '⚙️・bot-log', topic: 'Private bot logs.', private: 'staff' },
-            { key: 'entrance', name: '👋・entrance', topic: 'Welcome and entrance messages.' }
+            { key: 'entrance', name: '👋・entrance', topic: 'Private join and leave log.', private: 'staff' }
         ]
     },
     {
         key: 'community',
         name: '〢 𝐂𝐎𝐌𝐌𝐔𝐍𝐈𝐓𝐘',
+        private: 'community',
         channels: [
             { key: 'mainHall', name: '💬・main-hall', topic: 'Main community chat.' },
             { key: 'profileRank', name: '🪪・profile-rank', topic: 'Profiles, ranks, trophies, and progress.' },
@@ -165,6 +169,7 @@ const CATEGORIES = [
     {
         key: 'applications',
         name: '〢 𝐀𝐏𝐏𝐋𝐈𝐂𝐀𝐓𝐈𝐎𝐍𝐒',
+        private: 'locked',
         channels: [
             { key: 'creatorApply', name: '🎥・creator-apply', topic: 'Creator application backup panel.' },
             { key: 'cooperationApply', name: '🤝・cooperation-apply', topic: 'Cooperation application backup panel.' }
@@ -173,16 +178,17 @@ const CATEGORIES = [
     {
         key: 'findMates',
         name: '〢 𝐅𝐈𝐍𝐃 𝐌𝐀𝐓𝐄𝐒',
+        private: 'locked',
         channels: [
             { key: 'findMates', name: '🤝・find-mates', topic: 'Find teammates and casual mates.' },
             { key: 'findRankedMates', name: '🏆・find-ranked-mates', topic: 'Find ranked teammates.' },
-            { key: 'teamSearch', name: '👥・team-search', topic: 'Search for a fixed team.' },
-            { key: 'scrimSearch', name: '⚔️・scrim-search', topic: 'Scrims and practice matches.' }
+            { key: 'teamSearch', name: '👥・team-search', topic: 'Search for a fixed team.' }
         ]
     },
     {
         key: 'freeBsStuff',
         name: '〢 𝐅𝐑𝐄𝐄 𝐁𝐒 𝐒𝐓𝐔𝐅𝐅',
+        private: 'locked',
         channels: [
             { key: 'freeBsStuff', name: '🎁・free-bs-stuff', topic: 'Free Brawl Stars rewards and links.' },
             { key: 'eventAlerts', name: '🔔・event-alerts', topic: 'Event alerts.' },
@@ -193,6 +199,7 @@ const CATEGORIES = [
     {
         key: 'tournament',
         name: '〢 𝐓𝐎𝐔𝐑𝐍𝐀𝐌𝐄𝐍𝐓',
+        private: 'locked',
         channels: [
             { key: 'tournamentRegistration', name: '📝・tournament-registration', topic: 'Tournament registration panel.' },
             { key: 'tournamentGuide', name: '📘・tournament-guide', topic: 'Tournament guide.', private: 'tournament' },
@@ -228,16 +235,35 @@ const CATEGORIES = [
         key: 'voice',
         name: '〢 𝐕𝐎𝐈𝐂𝐄',
         channels: [
-            { key: 'tournamentLobby', name: 'Tournament Lobby', type: ChannelType.GuildVoice },
-            { key: 'staffVc', name: 'Staff VC', type: ChannelType.GuildVoice, private: 'staff' },
-            { key: 'afk', name: 'AFK', type: ChannelType.GuildVoice },
-            { key: 'music', name: 'Music', type: ChannelType.GuildVoice },
-            { key: 'stream', name: 'Stream', type: ChannelType.GuildVoice }
+            { key: 'tournamentLobby', name: '🏆・Tournament Lobby', type: ChannelType.GuildVoice },
+            { key: 'staffVc', name: '🛡️・Staff VC', type: ChannelType.GuildVoice, private: 'staff' },
+            { key: 'afk', name: '💤・AFK', type: ChannelType.GuildVoice, private: 'voiceNoSpeak' },
+            { key: 'music', name: '🎵・Music', type: ChannelType.GuildVoice },
+            { key: 'streamWaiting', name: '⏳・Waiting Room', type: ChannelType.GuildVoice, private: 'voiceWaiting' },
+            { key: 'stream', name: '📺・Stream', type: ChannelType.GuildVoice, private: 'stream' }
         ]
     }
 ];
 
 const CHANNEL_NAMES = Object.fromEntries(CATEGORIES.flatMap(category => category.channels.map(channel => [channel.key, channel.name])));
+const ROTATING_PANEL_KEYS = new Set([
+    'la-rules',
+    'la-get-started',
+    'la-support',
+    'la-cooperation-public',
+    'la-cooperation-apply',
+    'la-creator-chat',
+    'la-creator-apply',
+    'la-profile-tool',
+    'la-profile-current-top',
+    'la-find-mates',
+    'la-find-ranked-mates',
+    'la-team-search',
+    'la-tournament-registration',
+    'la-tournament-guide',
+    'la-tournament-rules',
+    'la-ticket-info'
+]);
 
 let clientRef = null;
 
@@ -267,6 +293,14 @@ function registerLaVelooSystem(client) {
                 console.error('[LA VELOO] Weekly profile winner check failed:', error.message);
             });
         }, 60 * 60 * 1000);
+
+        if (PANEL_REFRESH_INTERVAL_MS) {
+            setInterval(() => {
+                refreshStaticCommunityPanels(guild).catch(error => {
+                    console.error('[LA VELOO] Panel refresh failed:', error.message);
+                });
+            }, PANEL_REFRESH_INTERVAL_MS);
+        }
     });
 
     client.on('interactionCreate', async interaction => {
@@ -292,10 +326,49 @@ function registerLaVelooSystem(client) {
     client.on('guildMemberAdd', async member => {
         if (member.guild.id !== targetGuildId() || member.user.bot) return;
         await addRole(member, 'member').catch(() => null);
+        await sendWelcomeDm(member).catch(() => null);
         const entrance = await getChannel(member.guild, 'entrance');
         await entrance?.send({
-            embeds: [embed('Welcome', `${member} joined LA VELOO. Start in ${channelMention(member.guild, 'getStarted')} and choose your roles.`)]
+            embeds: [embed('Member Joined', `${member} joined LA VELOO.\nAccount: ${member.user.tag}\nGet started: ${channelMention(member.guild, 'getStarted')}`, 0x22c55e)]
         }).catch(() => null);
+    });
+
+    client.on('guildMemberRemove', async member => {
+        if (member.guild.id !== targetGuildId() || member.user.bot) return;
+        const entrance = await getChannel(member.guild, 'entrance');
+        await entrance?.send({
+            embeds: [embed('Member Left', `${member.user.tag} left LA VELOO.\nUser ID: ${member.user.id}`, 0xef4444)]
+        }).catch(() => null);
+    });
+}
+
+async function sendWelcomeDm(member) {
+    const getStarted = channelMention(member.guild, 'getStarted');
+    const rules = channelMention(member.guild, 'rules');
+    const mainHall = channelMention(member.guild, 'mainHall');
+
+    await member.send({
+        embeds: [
+            embed(
+                'Get Started First',
+                [
+                    `Welcome to **${member.guild.name}**.`,
+                    `Start here: ${getStarted}`,
+                    'Choose your platform/playstyle roles, then read the rule ticket before posting.',
+                    `After that you can chat in ${mainHall}.`
+                ].join('\n'),
+                0x3b82f6
+            ),
+            embed(
+                'Rules Summary',
+                [
+                    `Full rules: ${rules}`,
+                    'Be respectful, no spam, no scam links, no cheating, no fake tournament results, and no leaking private tickets.',
+                    'Use support if you need help.'
+                ].join('\n'),
+                0xef4444
+            )
+        ]
     });
 }
 
@@ -345,6 +418,7 @@ async function handleLaInteraction(interaction) {
         if (id === 'la_tournament_apply') return showTournamentModal(interaction);
         if (id === 'la_findmates_post') return showMatePostModal(interaction, 'casual');
         if (id === 'la_findranked_post') return showMatePostModal(interaction, 'ranked');
+        if (id === 'la_teamsearch_post') return showMatePostModal(interaction, 'team');
         if (id === 'la_profile_submit') return showBrawlifyProfileModal(interaction);
         if (id === 'la_ticket_accept') return handleTicketDecision(interaction, 'accepted');
         if (id === 'la_ticket_decline') return handleTicketDecision(interaction, 'declined');
@@ -376,6 +450,10 @@ async function setupLaVeloo(guild, options = {}) {
 
     const roles = await ensureRoles(guild);
     const channels = await ensureChannels(guild, roles);
+    await deleteDeprecatedChannels(guild);
+    await assignMemberRoleToCurrentMembers(guild, roles.member).catch(error => {
+        console.warn('[LA VELOO] Existing member role sync failed:', error.message);
+    });
 
     await guild.edit({
         name: SERVER_NAME,
@@ -420,6 +498,62 @@ async function setupLaVeloo(guild, options = {}) {
 
     await staffLog(guild, 'Setup refreshed', 'LA VELOO roles, categories, channels, permissions, and panels were created or updated.');
     return { roles, channels };
+}
+
+async function refreshStaticCommunityPanels(guild) {
+    await guild.channels.fetch().catch(() => null);
+    const channels = await getKnownChannels(guild);
+    await postLaPanels(guild, channels, { resend: true });
+}
+
+async function getKnownChannels(guild) {
+    const keys = CATEGORIES.flatMap(category => category.channels.map(channel => channel.key));
+    const entries = [];
+
+    for (const key of keys) {
+        entries.push([key, await getChannel(guild, key)]);
+    }
+
+    return Object.fromEntries(entries);
+}
+
+async function assignMemberRoleToCurrentMembers(guild, memberRole) {
+    if (!memberRole) return;
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) return;
+
+    for (const member of members.values()) {
+        if (!member.user.bot && !member.roles.cache.has(memberRole.id)) {
+            await member.roles.add(memberRole, 'LA VELOO member role sync').catch(() => null);
+        }
+    }
+}
+
+async function deleteDeprecatedChannels(guild) {
+    const store = readStore();
+    const deleted = new Set();
+    const storedScrimId = store.created?.channels?.scrimSearch;
+
+    if (storedScrimId) {
+        const channel = await guild.channels.fetch(storedScrimId).catch(() => null);
+        if (channel) {
+            await channel.delete('LA VELOO removed scrim-search channel').catch(() => null);
+            deleted.add(channel.id);
+        }
+    }
+
+    const scrimChannels = guild.channels.cache.filter(channel =>
+        channel.name?.toLowerCase().includes('scrim-search') && !deleted.has(channel.id)
+    );
+
+    for (const channel of scrimChannels.values()) {
+        await channel.delete('LA VELOO removed scrim-search channel').catch(() => null);
+    }
+
+    if (store.created?.channels?.scrimSearch) {
+        delete store.created.channels.scrimSearch;
+        writeStore(store);
+    }
 }
 
 async function ensureRoles(guild) {
@@ -486,11 +620,21 @@ async function ensureChannels(guild, roles) {
 
 async function ensureChannel(guild, options) {
     const parentId = options.parent?.id || null;
-    let channel = guild.channels.cache.find(existing => {
+    const store = readStore();
+    const storedId = options.key ? store.created?.channels?.[options.key] : null;
+    let channel = storedId ? await guild.channels.fetch(storedId).catch(() => null) : null;
+
+    if (channel && channel.type !== options.type) {
+        channel = null;
+    }
+
+    if (!channel) {
+        channel = guild.channels.cache.find(existing => {
         if (existing.name !== options.name || existing.type !== options.type) return false;
         if (parentId && existing.parentId !== parentId) return false;
         return true;
-    });
+        });
+    }
 
     if (!channel) {
         channel = await guild.channels.create({
@@ -507,6 +651,7 @@ async function ensureChannel(guild, options) {
     }
 
     const edits = {};
+    if (channel.name !== options.name) edits.name = options.name;
     if (parentId && channel.parentId !== parentId) edits.parent = parentId;
     if (options.topic !== undefined && channel.topic !== options.topic) edits.topic = options.topic;
     if (Object.keys(edits).length) {
@@ -526,16 +671,74 @@ function permissionOverwrites(guild, roles, privacy) {
 
     const botOverwrite = clientRef?.user ? {
         id: clientRef.user.id,
-        allow: [PERMS.ViewChannel, PERMS.SendMessages, PERMS.ReadMessageHistory, PERMS.ManageChannels, PERMS.ManageMessages, PERMS.Connect, PERMS.Speak]
+        allow: [
+            PERMS.ViewChannel,
+            PERMS.SendMessages,
+            PERMS.ReadMessageHistory,
+            PERMS.ManageChannels,
+            PERMS.ManageMessages,
+            PERMS.Connect,
+            PERMS.Speak,
+            PERMS.MoveMembers
+        ]
     } : null;
+
+    const memberRole = roles.member || null;
+    const lockedTextDeny = [
+        PERMS.SendMessages,
+        PERMS.SendMessagesInThreads,
+        PERMS.CreatePublicThreads,
+        PERMS.CreatePrivateThreads,
+        PERMS.AttachFiles,
+        PERMS.AddReactions
+    ];
 
     const staff = STAFF_ROLE_KEYS
         .map(key => roles[key])
         .filter(Boolean)
         .map(role => ({
             id: role.id,
-            allow: [PERMS.ViewChannel, PERMS.SendMessages, PERMS.ReadMessageHistory, PERMS.ManageChannels, PERMS.ManageMessages, PERMS.Connect, PERMS.Speak]
+            allow: [PERMS.ViewChannel, PERMS.SendMessages, PERMS.ReadMessageHistory, PERMS.ManageChannels, PERMS.ManageMessages, PERMS.Connect, PERMS.Speak, PERMS.MoveMembers]
         }));
+
+    if (privacy === 'locked') {
+        return [
+            { id: guild.roles.everyone.id, allow: [PERMS.ViewChannel, PERMS.ReadMessageHistory], deny: lockedTextDeny },
+            memberRole ? { id: memberRole.id, allow: [PERMS.ViewChannel, PERMS.ReadMessageHistory], deny: lockedTextDeny } : null,
+            botOverwrite,
+            ...staff
+        ].filter(Boolean);
+    }
+
+    if (privacy === 'community') {
+        return [
+            { id: guild.roles.everyone.id, allow: [PERMS.ViewChannel, PERMS.ReadMessageHistory], deny: lockedTextDeny },
+            memberRole ? {
+                id: memberRole.id,
+                allow: [PERMS.ViewChannel, PERMS.SendMessages, PERMS.ReadMessageHistory, PERMS.AttachFiles, PERMS.AddReactions]
+            } : null,
+            botOverwrite,
+            ...staff
+        ].filter(Boolean);
+    }
+
+    if (privacy === 'voiceNoSpeak' || privacy === 'voiceWaiting') {
+        return [
+            { id: guild.roles.everyone.id, allow: [PERMS.ViewChannel, PERMS.Connect], deny: [PERMS.Speak, PERMS.Stream] },
+            memberRole ? { id: memberRole.id, allow: [PERMS.ViewChannel, PERMS.Connect], deny: [PERMS.Speak, PERMS.Stream] } : null,
+            botOverwrite,
+            ...staff
+        ].filter(Boolean);
+    }
+
+    if (privacy === 'stream') {
+        return [
+            { id: guild.roles.everyone.id, allow: [PERMS.ViewChannel], deny: [PERMS.Connect, PERMS.Speak] },
+            memberRole ? { id: memberRole.id, allow: [PERMS.ViewChannel], deny: [PERMS.Connect, PERMS.Speak] } : null,
+            botOverwrite,
+            ...staff
+        ].filter(Boolean);
+    }
 
     if (privacy === 'staff') {
         return [
@@ -571,33 +774,36 @@ async function resolveCommunityChannel(guild, channelId, fallbackChannel) {
     return fallbackChannel || null;
 }
 
-async function postLaPanels(guild, channels) {
-    await upsertPanel(channels.rules, 'la-rules', localizedPanelPayload('rules'));
+async function postLaPanels(guild, channels, options = {}) {
+    const panelOptions = { resend: Boolean(options.resend) };
 
-    await upsertPanel(channels.getStarted, 'la-get-started', localizedPanelPayload('getStarted'));
+    await upsertPanel(channels.rules, 'la-rules', localizedPanelPayload('rules'), panelOptions);
 
-    await upsertPanel(channels.support, 'la-support', localizedPanelPayload('support'));
+    await upsertPanel(channels.getStarted, 'la-get-started', localizedPanelPayload('getStarted'), panelOptions);
 
-    await upsertPanel(channels.cooperations, 'la-cooperation-public', localizedPanelPayload('cooperation'));
-    await upsertPanel(channels.cooperationApply, 'la-cooperation-apply', localizedPanelPayload('cooperation'));
+    await upsertPanel(channels.support, 'la-support', localizedPanelPayload('support'), panelOptions);
 
-    await upsertPanel(channels.creatorChat, 'la-creator-chat', localizedPanelPayload('creator'));
-    await upsertPanel(channels.creatorApply, 'la-creator-apply', localizedPanelPayload('creator'));
+    await upsertPanel(channels.cooperations, 'la-cooperation-public', localizedPanelPayload('cooperation'), panelOptions);
+    await upsertPanel(channels.cooperationApply, 'la-cooperation-apply', localizedPanelPayload('cooperation'), panelOptions);
 
-    await upsertPanel(channels.profileTool, 'la-profile-tool', localizedPanelPayload('profileTool'));
-    await updateCurrentProfileLeaderboardPanel(guild);
+    await upsertPanel(channels.creatorChat, 'la-creator-chat', localizedPanelPayload('creator'), panelOptions);
+    await upsertPanel(channels.creatorApply, 'la-creator-apply', localizedPanelPayload('creator'), panelOptions);
 
-    await upsertPanel(channels.findMates, 'la-find-mates', localizedPanelPayload('findMates'));
-    await upsertPanel(channels.findRankedMates, 'la-find-ranked-mates', localizedPanelPayload('findRankedMates'));
+    await upsertPanel(channels.profileTool, 'la-profile-tool', localizedPanelPayload('profileTool'), panelOptions);
+    await updateCurrentProfileLeaderboardPanel(guild, panelOptions);
 
-    await upsertPanel(channels.tournamentRegistration, 'la-tournament-registration', localizedPanelPayload('tournamentRegistration'));
+    await upsertPanel(channels.findMates, 'la-find-mates', localizedPanelPayload('findMates'), panelOptions);
+    await upsertPanel(channels.findRankedMates, 'la-find-ranked-mates', localizedPanelPayload('findRankedMates'), panelOptions);
+    await upsertPanel(channels.teamSearch, 'la-team-search', localizedPanelPayload('teamSearch'), panelOptions);
 
-    await upsertPanel(channels.tournamentGuide, 'la-tournament-guide', localizedPanelPayload('tournamentGuide'));
-    await upsertPanel(channels.tournamentRules, 'la-tournament-rules', localizedPanelPayload('tournamentRules'));
+    await upsertPanel(channels.tournamentRegistration, 'la-tournament-registration', localizedPanelPayload('tournamentRegistration'), panelOptions);
+
+    await upsertPanel(channels.tournamentGuide, 'la-tournament-guide', localizedPanelPayload('tournamentGuide'), panelOptions);
+    await upsertPanel(channels.tournamentRules, 'la-tournament-rules', localizedPanelPayload('tournamentRules'), panelOptions);
 
     await upsertPanel(channels.staffPanels, 'la-staff-panels', localizedPanelPayload('staffPanels'));
 
-    await upsertPanel(channels.ticketInfo, 'la-ticket-info', localizedPanelPayload('ticketInfo'));
+    await upsertPanel(channels.ticketInfo, 'la-ticket-info', localizedPanelPayload('ticketInfo'), panelOptions);
     await updateMessageSnapshotPanel(guild, false);
 }
 
@@ -720,6 +926,11 @@ function getPanelCopy(panelId, language) {
                 description: 'Create a ranked player card so people can apply to connect with you.',
                 button: { customId: 'la_findranked_post', label: 'Create Player Card' }
             },
+            teamSearch: {
+                title: 'Team Search',
+                description: 'Create a team-search card with trophies, rank, device, role, and what team you want to join.',
+                button: { customId: 'la_teamsearch_post', label: 'Search Team' }
+            },
             tournamentRegistration: {
                 title: 'Tournament Registration',
                 description: 'Register for tournaments here.\n\nYou will be asked if you follow @anxsog on TikTok, how many trophies you have, if you are in the club, your rank, and why you want to join.\nStaff reviews your registration. If accepted, you receive Tournament Verified and unlock the tournament channels.',
@@ -735,7 +946,7 @@ function getPanelCopy(panelId, language) {
             },
             staffPanels: {
                 title: 'Staff Panels',
-                description: 'All bot-created reviews and panel records are routed here.\n\nReview flows:\n- Creator applications\n- Cooperation applications\n- Tournament registrations\n- Find Mates connect requests\n- Message activity snapshots'
+                description: 'All bot-created reviews and panel records are routed here.\n\nReview flows:\n- Creator applications\n- Cooperation applications\n- Tournament registrations\n- Find Mates / Ranked / Team Search connect requests\n- Message activity snapshots'
             },
             ticketInfo: {
                 title: 'Ticket Area',
@@ -795,6 +1006,11 @@ function getPanelCopy(panelId, language) {
                 description: 'Erstelle eine Ranked Player Card, damit andere sich zum Connecten bewerben können.',
                 button: { customId: 'la_findranked_post', label: 'Player Card erstellen' }
             },
+            teamSearch: {
+                title: 'Team Search',
+                description: 'Erstelle eine Team-Search Card mit Trophäen, Rank, Gerät, Rolle und deinem Wunsch-Team.',
+                button: { customId: 'la_teamsearch_post', label: 'Team suchen' }
+            },
             tournamentRegistration: {
                 title: 'Turnier Registrierung',
                 description: 'Registriere dich hier für Turniere.\n\nDu wirst gefragt, ob du @anxsog auf TikTok folgst, wie viele Trophäen du hast, ob du im Club bist, welchen Rank du hast und warum du mitmachen möchtest.\nStaff prüft deine Bewerbung. Bei Annahme bekommst du Tournament Verified und siehst die Turnier-Channels.',
@@ -810,7 +1026,7 @@ function getPanelCopy(panelId, language) {
             },
             staffPanels: {
                 title: 'Staff Panels',
-                description: 'Alle Bot-Reviews und Panel-Daten landen hier.\n\nReview-Flows:\n- Creator Bewerbungen\n- Cooperation Bewerbungen\n- Turnier Registrierungen\n- Find-Mates Connect Requests\n- Message Activity Snapshots'
+                description: 'Alle Bot-Reviews und Panel-Daten landen hier.\n\nReview-Flows:\n- Creator Bewerbungen\n- Cooperation Bewerbungen\n- Turnier Registrierungen\n- Find Mates / Ranked / Team Search Connect Requests\n- Message Activity Snapshots'
             },
             ticketInfo: {
                 title: 'Ticket Bereich',
@@ -961,6 +1177,11 @@ function applyPanelStyle(panelId, language, copy) {
                 description: 'Post your ranked card. The bot matches your 10k trophy group and ranked tier.',
                 button: { label: '🏆 Create Ranked Card' }
             },
+            teamSearch: {
+                title: '👥 Team Search',
+                description: 'Post your team-search card. The bot matches your trophy group and opens your private team channel.',
+                button: { label: '👥 Search Team' }
+            },
             tournamentRegistration: {
                 title: '🏆 Tournament Sign-Up',
                 description: 'Apply for the next tournament. Staff checks TikTok, trophies, club, rank, and motivation.',
@@ -1016,6 +1237,11 @@ function applyPanelStyle(panelId, language, copy) {
                 description: 'Poste deine Ranked Card. Der Bot matcht 10k-Trophäen-Gruppe und Ranked-Tier.',
                 button: { label: '🏆 Ranked Card erstellen' }
             },
+            teamSearch: {
+                title: '👥 Team Search',
+                description: 'Poste deine Team-Search Card. Der Bot matcht passende Trophäen und öffnet deinen privaten Team-Channel.',
+                button: { label: '👥 Team suchen' }
+            },
             tournamentRegistration: {
                 title: '🏆 Turnier Anmeldung',
                 description: 'Bewirb dich fürs nächste Turnier. Staff prüft TikTok, Trophäen, Club, Rank und Motivation.',
@@ -1035,6 +1261,7 @@ function applyPanelStyle(panelId, language, copy) {
             profileTool: { title: '🧰 Brawlify Profile Tool', description: 'Entre ton ID comme `QQVVP9G0`. Le bot poste ta card Brawlify, les 🔥 likes et le top semaine.', button: { label: '🧰 Envoyer ID' } },
             findMates: { title: '🤝 Find Mates', description: 'Poste ta player card. Le bot match les trophées proches et ouvre ton salon privé.', button: { label: '🤝 Créer Card' } },
             findRankedMates: { title: '🏆 Find Ranked Mates', description: 'Poste ta ranked card. Le bot match le groupe 10k trophées et le tier ranked.', button: { label: '🏆 Créer Ranked Card' } },
+            teamSearch: { title: '👥 Team Search', description: 'Poste ta team card. Le bot match les trophées proches et ouvre ton salon team privé.', button: { label: '👥 Chercher Team' } },
             tournamentRegistration: { title: '🏆 Inscription Tournoi', description: 'Candidate au prochain tournoi. Le staff vérifie TikTok, trophées, club, rank et motivation.', button: { label: '🏆 S’inscrire' } },
             tournamentGuide: { title: '📘 Guide Tournoi', description: 'Infos tournoi, horaires, format et prochaines étapes.' },
             tournamentRules: { title: '⚖️ Règles Tournoi', description: 'Règles officielles du tournoi. À lire avant de jouer.' },
@@ -1050,6 +1277,7 @@ function applyPanelStyle(panelId, language, copy) {
             profileTool: { title: '🧰 Brawlify Profile Tool', description: 'Pon tu ID como `QQVVP9G0`. El bot publica tu card Brawlify, 🔥 likes y top semanal.', button: { label: '🧰 Enviar ID' } },
             findMates: { title: '🤝 Find Mates', description: 'Publica tu player card. El bot empareja trofeos similares y abre tu canal privado.', button: { label: '🤝 Crear Card' } },
             findRankedMates: { title: '🏆 Find Ranked Mates', description: 'Publica tu ranked card. El bot empareja grupo 10k de trofeos y tier ranked.', button: { label: '🏆 Crear Ranked Card' } },
+            teamSearch: { title: '👥 Team Search', description: 'Publica tu team card. El bot empareja trofeos similares y abre tu canal privado de team.', button: { label: '👥 Buscar Team' } },
             tournamentRegistration: { title: '🏆 Registro de Torneo', description: 'Aplica al próximo torneo. Staff revisa TikTok, trofeos, club, rank y motivación.', button: { label: '🏆 Registrarse' } },
             tournamentGuide: { title: '📘 Guía de Torneo', description: 'Info del torneo, horarios, formato y próximos pasos.' },
             tournamentRules: { title: '⚖️ Reglas de Torneo', description: 'Reglas oficiales del torneo. Lee antes de jugar.' },
@@ -1065,6 +1293,7 @@ function applyPanelStyle(panelId, language, copy) {
             profileTool: { title: '🧰 Brawlify Profile Tool', description: 'Inserisci ID come `QQVVP9G0`. Il bot posta card Brawlify, 🔥 likes e top settimana.', button: { label: '🧰 Invia ID' } },
             findMates: { title: '🤝 Find Mates', description: 'Pubblica la player card. Il bot matcha trofei simili e apre il tuo canale privato.', button: { label: '🤝 Crea Card' } },
             findRankedMates: { title: '🏆 Find Ranked Mates', description: 'Pubblica la ranked card. Il bot matcha gruppo 10k trofei e tier ranked.', button: { label: '🏆 Crea Ranked Card' } },
+            teamSearch: { title: '👥 Team Search', description: 'Pubblica la team card. Il bot matcha trofei simili e apre il tuo canale team privato.', button: { label: '👥 Cerca Team' } },
             tournamentRegistration: { title: '🏆 Registrazione Torneo', description: 'Candidati al prossimo torneo. Staff controlla TikTok, trofei, club, rank e motivazione.', button: { label: '🏆 Registrati' } },
             tournamentGuide: { title: '📘 Guida Torneo', description: 'Info torneo, orari, formato e prossimi step.' },
             tournamentRules: { title: '⚖️ Regole Torneo', description: 'Regole ufficiali del torneo. Leggi prima di giocare.' },
@@ -1304,15 +1533,23 @@ function selfRoleRow(language = 'en') {
     );
 }
 
-async function upsertPanel(channel, panelKey, payload) {
+async function upsertPanel(channel, panelKey, payload, options = {}) {
     if (!channel || channel.type !== ChannelType.GuildText) return null;
 
     const store = readStore();
     store.panels ||= {};
+    const shouldResend = Boolean(options.resend && ROTATING_PANEL_KEYS.has(panelKey));
 
     let message = store.panels[panelKey]
         ? await channel.messages.fetch(store.panels[panelKey]).catch(() => null)
         : null;
+
+    if (shouldResend && message) {
+        await message.delete().catch(() => null);
+        delete store.panels[panelKey];
+        writeStore(store);
+        message = null;
+    }
 
     if (!message) {
         const messages = await channel.messages.fetch({ limit: 25 }).catch(() => null);
@@ -1320,6 +1557,11 @@ async function upsertPanel(channel, panelKey, payload) {
             candidate.author.id === clientRef.user.id &&
             candidate.embeds.some(candidateEmbed => candidateEmbed.title === payload.embeds?.[0]?.data?.title)
         ) || null;
+    }
+
+    if (shouldResend && message) {
+        await message.delete().catch(() => null);
+        message = null;
     }
 
     if (message) {
@@ -1419,16 +1661,23 @@ function showTournamentModal(interaction) {
 }
 
 function showMatePostModal(interaction, mode) {
+    const isTeam = mode === 'team';
     return interaction.showModal(
         new ModalBuilder()
             .setCustomId(`la_mate_post_modal_${mode}`)
-            .setTitle(mode === 'ranked' ? 'Find Ranked Mates' : 'Find Mates')
+            .setTitle(mode === 'ranked' ? 'Find Ranked Mates' : isTeam ? 'Team Search' : 'Find Mates')
             .addComponents(
                 input('player', 'Player name', 'Your Brawl Stars name', TextInputStyle.Short, true),
                 input('trophies', 'Trophies', 'Example: 42000', TextInputStyle.Short, true),
                 input('rank', 'Rank', 'Example: Masters / Legendary / Gold...', TextInputStyle.Short, true),
                 input('device', 'Device', 'Mobile / iPad / PC', TextInputStyle.Short, true),
-                input('goal', 'What do you want to play?', 'Example: push ranked, 3v3, duo, trophies. Optional image link.', TextInputStyle.Paragraph, true)
+                input(
+                    'goal',
+                    isTeam ? 'What team are you looking for?' : 'What do you want to play?',
+                    isTeam ? 'Example: 3v3 team, ranked team, active club/team. Optional image link.' : 'Example: push ranked, 3v3, duo, trophies. Optional image link.',
+                    TextInputStyle.Paragraph,
+                    true
+                )
             )
     );
 }
@@ -1691,7 +1940,7 @@ async function handleProfileLike(interaction, submissionId) {
 async function createMatePost(interaction, mode) {
     const fields = fieldsFrom(interaction, ['player', 'trophies', 'rank', 'device', 'goal']);
     const id = shortId('mate');
-    const channelKey = mode === 'ranked' ? 'findRankedMates' : 'findMates';
+    const channelKey = mode === 'ranked' ? 'findRankedMates' : mode === 'team' ? 'teamSearch' : 'findMates';
     const channel = await getChannel(interaction.guild, channelKey);
     const trophiesNumber = parseTrophies(fields.Trophies);
     const trophyBucket = getTrophyBucket(trophiesNumber);
@@ -1742,7 +1991,7 @@ async function createMatePost(interaction, mode) {
     await searchChannel?.send({
         embeds: [
             embed(
-                mode === 'ranked' ? '🏆 Ranked Search Started' : '🤝 Mate Search Started',
+                mode === 'ranked' ? '🏆 Ranked Search Started' : mode === 'team' ? '👥 Team Search Started' : '🤝 Mate Search Started',
                 [
                     `${interaction.user}, your private search channel is ready.`,
                     `Public post: ${message ? `[open in ${channel.name}](${discordMessageUrl(interaction.guild.id, channel.id, message.id)})` : 'not available'}`,
@@ -1751,12 +2000,12 @@ async function createMatePost(interaction, mode) {
                     '',
                     'Matching cards appear here automatically.'
                 ].join('\n'),
-                mode === 'ranked' ? 0xfacc15 : 0x3b82f6
+                mode === 'ranked' ? 0xfacc15 : mode === 'team' ? 0x22c55e : 0x3b82f6
             )
         ]
     }).catch(() => null);
 
-    await addRole(interaction.member, mode === 'ranked' ? 'rankedPlayer' : 'lookingForMates').catch(() => null);
+    await addRole(interaction.member, mode === 'ranked' ? 'rankedPlayer' : mode === 'team' ? 'teamPlayer' : 'lookingForMates').catch(() => null);
     await sendMateMatches(interaction.guild, store.matePosts[id]).catch(error => {
         console.error('[LA VELOO] Mate matching failed:', error.message);
     });
@@ -1905,7 +2154,8 @@ async function ensureMateSearchChannel(guild, userId, username, mode) {
     const store = readStore();
     store.mateSearchChannels ||= {};
 
-    const existingId = store.mateSearchChannels[userId]?.channelId;
+    const storeKey = `${userId}:${mode || 'mate'}`;
+    const existingId = store.mateSearchChannels[storeKey]?.channelId || store.mateSearchChannels[userId]?.channelId;
     if (existingId) {
         const existingChannel = await guild.channels.fetch(existingId).catch(() => null);
         if (existingChannel) {
@@ -1913,13 +2163,14 @@ async function ensureMateSearchChannel(guild, userId, username, mode) {
         }
     }
 
+    const prefix = mode === 'team' ? 'team-search' : mode === 'ranked' ? 'ranked-search' : 'mate-search';
     const channel = await createPrivateTextChannel(guild, {
-        name: `mate-search-${cleanName(username)}`,
+        name: `${prefix}-${cleanName(username)}`,
         userIds: [userId],
         topic: `LA_MATE_SEARCH user=${userId} mode=${mode}`
     });
 
-    store.mateSearchChannels[userId] = {
+    store.mateSearchChannels[storeKey] = {
         channelId: channel.id,
         userId,
         mode,
@@ -2137,8 +2388,10 @@ function getProfileUrlFromSubmissionId(id) {
 }
 
 function buildMateCardEmbed({ mode, userId, fields, matching, profileImageUrl, titlePrefix = null }) {
-    const title = titlePrefix || (mode === 'ranked' ? '🏆 Ranked Mate Card' : '🤝 Mate Card');
-    const cardEmbed = embed(title, `<@${userId}> is looking for mates.`, mode === 'ranked' ? 0xfacc15 : 0x3b82f6)
+    const title = titlePrefix || (mode === 'ranked' ? '🏆 Ranked Mate Card' : mode === 'team' ? '👥 Team Search Card' : '🤝 Mate Card');
+    const description = mode === 'team' ? `<@${userId}> is looking for a team.` : `<@${userId}> is looking for mates.`;
+    const color = mode === 'ranked' ? 0xfacc15 : mode === 'team' ? 0x22c55e : 0x3b82f6;
+    const cardEmbed = embed(title, description, color)
         .addFields([
             ...objectFields(fields),
             { name: '🏅 Trophies', value: matching?.trophyBucketLabel || 'unknown', inline: true },
@@ -2370,7 +2623,7 @@ async function updateMessageSnapshotPanel(guild, force) {
     });
 }
 
-async function updateCurrentProfileLeaderboardPanel(guild) {
+async function updateCurrentProfileLeaderboardPanel(guild, options = {}) {
     const channel = await getChannel(guild, 'profileTool');
     if (!channel) return;
 
@@ -2385,7 +2638,7 @@ async function updateCurrentProfileLeaderboardPanel(guild) {
             embeds: [embed('🔥 Current Weekly Top', 'No Brawlify profiles have been submitted this week yet.', 0xf97316)]
         };
 
-    await upsertPanel(channel, 'la-profile-current-top', payload);
+    await upsertPanel(channel, 'la-profile-current-top', payload, options);
 }
 
 async function announceWeeklyProfileWinnerIfNeeded(guild) {
