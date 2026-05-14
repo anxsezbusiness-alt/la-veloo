@@ -47,9 +47,13 @@ Run `/setup-la-veloo` after inviting the bot to refresh all LA VELOO roles, chan
 - Team Search cards
 - Private mate-search channels and automatic 10k trophy bucket matching
 - Ranked matching for Bronze, Silver, Gold, Diamond, Mythic, Legendary, Master, Pro
-- Member role on join, welcome DM, and private entrance join/leave log
+- Member role on join, welcome DM, and entrance join/leave log
 - Community-only member posting permissions
 - Stream waiting room and staff-only stream voice
-- Static community panels are resent every 5 minutes without deleting user-created cards
+- Static writable-channel panels are resent silently every 5 minutes without deleting user-created cards
+- Rules, support, get-started, cooperations, and ticket-info panels stay in place instead of being resent
+- Profile-rank screenshot panel with automatic fire reaction
+- Stored role IDs and duplicate-role cleanup on setup
+- Owner-only channel management permissions
 - Brawlify profile tool with 🔥 likes and weekly winner XP
 - Staff logs, bot logs, and message activity snapshot
