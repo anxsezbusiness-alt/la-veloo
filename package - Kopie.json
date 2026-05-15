@@ -1,0 +1,18 @@
+{
+  "name": "la-veloo-discord-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LA VELOO Discord community bot for Brawl Stars tournaments, mates, tickets, panels, and Brawlify profiles.",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0"
+  }
+}
