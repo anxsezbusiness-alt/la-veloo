@@ -254,6 +254,33 @@ const CATEGORIES = [
 ];
 
 const CHANNEL_NAMES = Object.fromEntries(CATEGORIES.flatMap(category => category.channels.map(channel => [channel.key, channel.name])));
+const CHANNEL_IDS = {
+    rules: '1504532922781143061',
+    support: '1504532924475904171',
+    getStarted: '1504532925377675265',
+    cooperations: '1504532927025909902',
+    clubVerify: '1504880528002646146',
+    winners: '1504532928108171376',
+    matchResults: '1504532930326696106',
+    updates: '1504532934944886818',
+    botLog: '1504532935959646261',
+    entrance: '1504532936651968625',
+    profileRank: '1504532939298443385',
+    profileTool: '1504532939973726312',
+    creatorChat: '1504532940736958607',
+    suggestions: '1504880543588946153',
+    mapDesigns: '1504880550723326095',
+    creatorApply: '1504532944809627704',
+    cooperationApply: '1504532946449600542',
+    findMates: '1504532948395884666',
+    findRankedMates: '1504532949595459759',
+    teamSearch: '1504532951096885471',
+    tournamentRegistration: '1504532960194593029',
+    tournamentGuide: '1504532961289306322',
+    tournamentRules: '1504532962526625942',
+    staffPanels: '1504532973905641513',
+    ticketInfo: '1504532983368126716'
+};
 const ROTATING_PANEL_KEYS = new Set([
     'la-cooperation-apply',
     'la-creator-chat',
@@ -272,6 +299,9 @@ const ROTATING_PANEL_KEYS = new Set([
 
 let clientRef = null;
 const inviteCache = new Map();
+const serverUpdateQueues = new Map();
+const serverUpdateTimers = new Map();
+const serverUpdateSuppressUntil = new Map();
 
 function registerLaVelooSystem(client) {
     clientRef = client;
@@ -369,6 +399,64 @@ function registerLaVelooSystem(client) {
     client.on('inviteDelete', async invite => {
         if (invite.guild?.id !== targetGuildId()) return;
         await refreshInviteCache(invite.guild).catch(() => null);
+    });
+
+    client.on('channelCreate', channel => {
+        if (!channel.guild || channel.guild.id !== targetGuildId()) return;
+        queueServerUpdate(channel.guild, 'added', `Channel created: **#${channel.name}**`);
+    });
+
+    client.on('channelDelete', channel => {
+        if (!channel.guild || channel.guild.id !== targetGuildId()) return;
+        queueServerUpdate(channel.guild, 'removed', `Channel removed: **#${channel.name}**`);
+    });
+
+    client.on('channelUpdate', (oldChannel, newChannel) => {
+        if (!newChannel.guild || newChannel.guild.id !== targetGuildId()) return;
+        const changes = [];
+        if (oldChannel.name !== newChannel.name) {
+            changes.push(`Channel renamed: **#${oldChannel.name}** → **#${newChannel.name}**`);
+        }
+        if ('topic' in oldChannel && oldChannel.topic !== newChannel.topic) {
+            changes.push(`Channel topic updated: **#${newChannel.name}**`);
+        }
+        if (oldChannel.parentId !== newChannel.parentId) {
+            changes.push(`Channel category moved: **#${newChannel.name}**`);
+        }
+        for (const change of changes) {
+            queueServerUpdate(newChannel.guild, 'improved', change);
+        }
+    });
+
+    client.on('roleCreate', role => {
+        if (role.guild.id !== targetGuildId()) return;
+        queueServerUpdate(role.guild, 'added', `Role created: **${role.name}**`);
+    });
+
+    client.on('roleDelete', role => {
+        if (role.guild.id !== targetGuildId()) return;
+        queueServerUpdate(role.guild, 'removed', `Role removed: **${role.name}**`);
+    });
+
+    client.on('roleUpdate', (oldRole, newRole) => {
+        if (newRole.guild.id !== targetGuildId()) return;
+        if (oldRole.name !== newRole.name) {
+            queueServerUpdate(newRole.guild, 'improved', `Role renamed: **${oldRole.name}** → **${newRole.name}**`);
+            return;
+        }
+        if (oldRole.color !== newRole.color || oldRole.permissions.bitfield !== newRole.permissions.bitfield || oldRole.hoist !== newRole.hoist) {
+            queueServerUpdate(newRole.guild, 'improved', `Role updated: **${newRole.name}**`);
+        }
+    });
+
+    client.on('guildUpdate', (oldGuild, newGuild) => {
+        if (newGuild.id !== targetGuildId()) return;
+        if (oldGuild.name !== newGuild.name) {
+            queueServerUpdate(newGuild, 'improved', `Server name updated: **${oldGuild.name}** → **${newGuild.name}**`);
+        }
+        if (oldGuild.verificationLevel !== newGuild.verificationLevel) {
+            queueServerUpdate(newGuild, 'improved', 'Server verification level updated.');
+        }
     });
 }
 
@@ -651,12 +739,12 @@ async function handleLaInteraction(interaction) {
 }
 
 async function setupLaVeloo(guild, options = {}) {
+    suppressServerUpdateEvents(guild, 90_000);
     await guild.roles.fetch().catch(() => null);
     await guild.channels.fetch().catch(() => null);
 
     const roles = await ensureRoles(guild);
     const channels = await ensureChannels(guild, roles);
-    await deleteDeprecatedChannels(guild);
     await assignMemberRoleToCurrentMembers(guild, roles.member).catch(error => {
         console.warn('[LA VELOO] Existing member role sync failed:', error.message);
     });
@@ -664,41 +752,10 @@ async function setupLaVeloo(guild, options = {}) {
         console.warn('[LA VELOO] OG role sync failed:', error.message);
     });
 
-    await guild.edit({
-        name: SERVER_NAME,
-        description: 'Brawl Stars community for tournaments, mates, ranked, creators, cooperations, and free BS rewards.',
-        preferredLocale: 'en-US',
-        defaultMessageNotifications: 1,
-        explicitContentFilter: 2,
-        verificationLevel: 1,
-        reason: 'LA VELOO community setup'
-    }).catch(error => console.warn('[LA VELOO] Guild edit failed:', error.message));
-
-    if (channels.afk) {
-        await guild.setAFKChannel(channels.afk, 'LA VELOO AFK voice').catch(() => null);
-    }
-
-    if (ENABLE_COMMUNITY) {
-        const features = new Set(guild.features || []);
-        features.add('COMMUNITY');
-        const rulesChannel = await resolveCommunityChannel(guild, COMMUNITY_RULES_CHANNEL_ID, channels.rules);
-        const updatesChannel = await resolveCommunityChannel(guild, COMMUNITY_UPDATES_CHANNEL_ID, channels.updates);
-        const safetyChannel = await resolveCommunityChannel(guild, COMMUNITY_SAFETY_CHANNEL_ID, channels.modLogs);
-
-        await guild.edit({
-            features: [...features],
-            rulesChannel,
-            publicUpdatesChannel: updatesChannel,
-            safetyAlertsChannel: safetyChannel,
-            reason: 'LA VELOO community feature setup'
-        }).catch(error => {
-            console.warn('[LA VELOO] Community enable failed. You can enable it manually in Discord settings:', error.message);
-        });
-    }
-
     const store = readStore();
     store.guildId = guild.id;
     store.lastSetupAt = new Date().toISOString();
+    store.managedStructure = false;
     writeStore(store);
 
     if (options.postPanels !== false) {
@@ -706,9 +763,133 @@ async function setupLaVeloo(guild, options = {}) {
     }
 
     if (!options.quiet) {
-        await staffLog(guild, 'Setup refreshed', 'LA VELOO roles, categories, channels, permissions, and panels were created or updated.');
+        await staffLog(guild, 'Setup refreshed', 'LA VELOO panels were refreshed using existing server channels. No roles or server structure were created.');
+        await postSetupStatusUpdate(guild, {
+            panelsRefreshed: options.postPanels !== false,
+            quiet: Boolean(options.quiet)
+        }).catch(error => {
+            console.warn('[LA VELOO] Setup status update failed:', error.message);
+        });
     }
     return { roles, channels };
+}
+
+function suppressServerUpdateEvents(guild, durationMs) {
+    serverUpdateSuppressUntil.set(guild.id, Date.now() + durationMs);
+}
+
+function queueServerUpdate(guild, type, text) {
+    if (!guild || guild.id !== targetGuildId()) return;
+    if (Date.now() < (serverUpdateSuppressUntil.get(guild.id) || 0)) return;
+
+    const queue = serverUpdateQueues.get(guild.id) || {
+        guild,
+        added: [],
+        improved: [],
+        removed: []
+    };
+
+    queue[type] ||= [];
+    if (!queue[type].includes(text)) {
+        queue[type].push(text);
+    }
+    serverUpdateQueues.set(guild.id, queue);
+
+    if (serverUpdateTimers.has(guild.id)) {
+        return;
+    }
+
+    const timer = setTimeout(() => {
+        serverUpdateTimers.delete(guild.id);
+        flushServerUpdateQueue(guild.id).catch(error => {
+            console.warn('[LA VELOO] Server update flush failed:', error.message);
+        });
+    }, 45_000);
+
+    serverUpdateTimers.set(guild.id, timer);
+}
+
+async function flushServerUpdateQueue(guildId) {
+    const queue = serverUpdateQueues.get(guildId);
+    if (!queue) return;
+    serverUpdateQueues.delete(guildId);
+
+    const total = queue.added.length + queue.improved.length + queue.removed.length;
+    if (!total) return;
+
+    await postServerStatusUpdate(queue.guild, {
+        title: '🛠️ LA VELOO STATUS | SERVER UPDATE',
+        added: queue.added,
+        improved: queue.improved,
+        removed: queue.removed,
+        note: [
+            'Server changes were detected and bundled automatically.',
+            'LA VELOO archive // PROTOCOL UPDATED'
+        ].join('\n')
+    });
+}
+
+async function postSetupStatusUpdate(guild, meta = {}) {
+    const store = readStore();
+    const setupHash = [
+        Object.keys(store.created?.roles || {}).length,
+        Object.keys(store.created?.channels || {}).length,
+        meta.panelsRefreshed ? 'panels' : 'no-panels'
+    ].join(':');
+
+    if (store.lastPublicSetupUpdateHash === setupHash && !meta.panelsRefreshed) {
+        return;
+    }
+
+    store.lastPublicSetupUpdateHash = setupHash;
+    store.lastPublicSetupUpdateAt = new Date().toISOString();
+    writeStore(store);
+
+    await postServerStatusUpdate(guild, {
+        title: '🛠️ LA VELOO STATUS | SYSTEM UPDATE',
+        added: [
+            'Bot systems checked using the existing Discord channels.',
+            'Club Verification, Suggestions, Map Designs, Team Search, and Tournament panels are included.'
+        ],
+        improved: [
+            meta.panelsRefreshed
+                ? 'Panels were refreshed manually with `/setup-la-veloo`.'
+                : 'Startup refresh ran quietly without reposting public panels.',
+            'No roles, channels, permissions, or server settings were created by setup.'
+        ],
+        removed: [
+            'Automatic role/channel creation is disabled.'
+        ],
+        note: [
+            'The LA VELOO bot was refreshed in existing-server mode. Members can use the latest panels, verification flows, and community systems.',
+            'LA VELOO archive // PROTOCOL UPDATED'
+        ].join('\n')
+    });
+}
+
+async function postServerStatusUpdate(guild, update) {
+    const channel = await getChannel(guild, 'updates');
+    if (!channel || channel.type !== ChannelType.GuildText) return;
+
+    const updateEmbed = embed(update.title, update.note || 'LA VELOO server update.', 0x38bdf8)
+        .addFields([
+            { name: '🟢 ADDED', value: formatUpdateLines(update.added, 'No new additions.'), inline: false },
+            { name: '🟡 IMPROVED', value: formatUpdateLines(update.improved, 'No improvements listed.'), inline: false },
+            { name: '🔴 REMOVED / CLEANED', value: formatUpdateLines(update.removed, 'Nothing removed.'), inline: false },
+            { name: '⚡ SYSTEM-NOTIZ', value: cleanValue(update.note || 'LA VELOO archive // PROTOCOL UPDATED', 950), inline: false }
+        ])
+        .setTimestamp(new Date());
+
+    await channel.send(panelSendPayload({ embeds: [updateEmbed] })).catch(() => null);
+}
+
+function formatUpdateLines(lines, fallback) {
+    const cleanLines = (lines || [])
+        .filter(Boolean)
+        .map(line => `• ${cleanValue(line, 180)}`)
+        .slice(0, 8);
+
+    return cleanLines.length ? cleanLines.join('\n') : fallback;
 }
 
 async function refreshStaticCommunityPanels(guild) {
@@ -771,30 +952,7 @@ async function addOgRoleIfEligible(member) {
 }
 
 async function deleteDeprecatedChannels(guild) {
-    const store = readStore();
-    const deleted = new Set();
-    const storedScrimId = store.created?.channels?.scrimSearch;
-
-    if (storedScrimId) {
-        const channel = await guild.channels.fetch(storedScrimId).catch(() => null);
-        if (channel) {
-            await channel.delete('LA VELOO removed scrim-search channel').catch(() => null);
-            deleted.add(channel.id);
-        }
-    }
-
-    const scrimChannels = guild.channels.cache.filter(channel =>
-        channel.name?.toLowerCase().includes('scrim-search') && !deleted.has(channel.id)
-    );
-
-    for (const channel of scrimChannels.values()) {
-        await channel.delete('LA VELOO removed scrim-search channel').catch(() => null);
-    }
-
-    if (store.created?.channels?.scrimSearch) {
-        delete store.created.channels.scrimSearch;
-        writeStore(store);
-    }
+    return null;
 }
 
 async function ensureRoles(guild) {
@@ -807,35 +965,17 @@ async function ensureRoles(guild) {
         const name = ROLE_NAMES[definition.key];
         const storedId = store.created.roles[definition.key];
         let role = storedId ? await guild.roles.fetch(storedId).catch(() => null) : null;
-        const matchingRoles = guild.roles.cache
-            .filter(existing => existing.name === name)
-            .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
         if (!role) {
-            role = matchingRoles.first() || null;
+            role = guild.roles.cache.find(existing => existing.name === name) || null;
         }
 
-        const data = {
-            name,
-            color: definition.color,
-            hoist: Boolean(definition.hoist),
-            mentionable: Boolean(definition.mentionable),
-            permissions: new PermissionsBitField(definition.permissions || [])
-        };
-
-        if (!role) {
-            role = await guild.roles.create({ ...data, reason: 'LA VELOO setup' });
+        if (role) {
             store.created.roles[definition.key] = role.id;
-            rememberCreated('roles', definition.key, role.id);
+            roles[definition.key] = role;
         } else {
-            store.created.roles[definition.key] = role.id;
-            await role.edit(data, 'LA VELOO role refresh').catch(() => null);
+            delete store.created.roles[definition.key];
         }
-
-        roles[definition.key] = role;
-        await removeDuplicateRoles(guild, name, role).catch(error => {
-            console.warn(`[LA VELOO] Role duplicate cleanup failed for ${definition.key}:`, error.message);
-        });
     }
 
     writeStore(store);
@@ -868,85 +1008,37 @@ async function removeDuplicateRoles(guild, roleName, keeper) {
 
 async function ensureChannels(guild, roles) {
     const channels = {};
+    const store = readStore();
+    store.created ||= { roles: {}, channels: {}, privateChannels: {} };
+    store.created.channels ||= {};
 
     for (const categoryDefinition of CATEGORIES) {
-        const categoryOverwrites = permissionOverwrites(guild, roles, categoryDefinition.private || null);
-        const category = await ensureChannel(guild, {
-            key: categoryDefinition.key,
-            name: categoryDefinition.name,
-            type: ChannelType.GuildCategory,
-            permissionOverwrites: categoryOverwrites.length ? categoryOverwrites : undefined
-        });
-        channels[categoryDefinition.key] = category;
-
-        let position = 0;
         for (const channelDefinition of categoryDefinition.channels) {
-            const type = channelDefinition.type || ChannelType.GuildText;
-            const privacy = channelDefinition.private || categoryDefinition.private || null;
-            const overwrites = permissionOverwrites(guild, roles, privacy);
-            const channel = await ensureChannel(guild, {
-                key: channelDefinition.key,
-                name: channelDefinition.name,
-                type,
-                parent: category,
-                topic: type === ChannelType.GuildText ? channelDefinition.topic : undefined,
-                position,
-                permissionOverwrites: overwrites.length ? overwrites : undefined
-            });
-            channels[channelDefinition.key] = channel;
-            position += 1;
+            const channel = await resolveExistingChannel(guild, channelDefinition.key);
+            if (channel) {
+                channels[channelDefinition.key] = channel;
+                store.created.channels[channelDefinition.key] = channel.id;
+            }
         }
     }
+
+    writeStore(store);
 
     return channels;
 }
 
 async function ensureChannel(guild, options) {
-    const parentId = options.parent?.id || null;
-    const store = readStore();
-    const storedId = options.key ? store.created?.channels?.[options.key] : null;
-    let channel = storedId ? await guild.channels.fetch(storedId).catch(() => null) : null;
+    return resolveExistingChannel(guild, options.key || options.name);
+}
 
-    if (channel && channel.type !== options.type) {
-        channel = null;
+async function resolveExistingChannel(guild, key) {
+    const id = CHANNEL_IDS[key];
+    if (id) {
+        const byId = await guild.channels.fetch(id).catch(() => null);
+        if (byId) return byId;
     }
 
-    if (!channel) {
-        channel = guild.channels.cache.find(existing => {
-        if (existing.name !== options.name || existing.type !== options.type) return false;
-        if (parentId && existing.parentId !== parentId) return false;
-        return true;
-        });
-    }
-
-    if (!channel) {
-        channel = await guild.channels.create({
-            name: options.name,
-            type: options.type,
-            parent: options.parent || undefined,
-            topic: options.topic,
-            position: options.position,
-            permissionOverwrites: options.permissionOverwrites,
-            reason: 'LA VELOO setup'
-        });
-        rememberCreated('channels', options.key || options.name, channel.id);
-        return channel;
-    }
-
-    const edits = {};
-    if (channel.name !== options.name) edits.name = options.name;
-    if (parentId && channel.parentId !== parentId) edits.parent = parentId;
-    if (options.topic !== undefined && channel.topic !== options.topic) edits.topic = options.topic;
-    if (Object.keys(edits).length) {
-        await channel.edit(edits, 'LA VELOO channel refresh').catch(() => null);
-    }
-
-    if (options.permissionOverwrites) {
-        await channel.permissionOverwrites.set(options.permissionOverwrites, 'LA VELOO permission refresh').catch(() => null);
-    }
-
-    rememberCreated('channels', options.key || options.name, channel.id);
-    return channel;
+    return guild.channels.cache.find(channel => channel.name === CHANNEL_NAMES[key]) || null;
 }
 
 function permissionOverwrites(guild, roles, privacy) {
@@ -2812,7 +2904,7 @@ async function handleMateDecision(interaction, requestId, accepted) {
 }
 
 async function createPrivateTextChannel(guild, options) {
-    const category = await getChannel(guild, 'tickets');
+    const category = await getPrivateChannelParent(guild);
     const overwrites = await privateOverwrites(guild, options.userIds || []);
 
     const channel = await guild.channels.create({
@@ -2836,7 +2928,7 @@ async function createPrivateTextChannel(guild, options) {
 }
 
 async function createPrivateVoiceChannel(guild, options) {
-    const category = await getChannel(guild, 'tickets');
+    const category = await getPrivateChannelParent(guild);
     const overwrites = await privateOverwrites(guild, options.userIds || []);
 
     const channel = await guild.channels.create({
@@ -2856,6 +2948,19 @@ async function createPrivateVoiceChannel(guild, options) {
     });
 
     return channel;
+}
+
+async function getPrivateChannelParent(guild) {
+    const ticketCategory = await getChannel(guild, 'tickets');
+    if (ticketCategory?.type === ChannelType.GuildCategory) return ticketCategory;
+
+    const ticketInfo = await getChannel(guild, 'ticketInfo');
+    if (ticketInfo?.parentId) {
+        return guild.channels.cache.get(ticketInfo.parentId)
+            || await guild.channels.fetch(ticketInfo.parentId).catch(() => null);
+    }
+
+    return null;
 }
 
 async function privateOverwrites(guild, userIds) {
@@ -3413,7 +3518,7 @@ function targetGuildId() {
 
 async function getChannel(guild, key) {
     const store = readStore();
-    const channelId = store.created?.channels?.[key] || null;
+    const channelId = CHANNEL_IDS[key] || store.created?.channels?.[key] || null;
     if (channelId) {
         const channel = await guild.channels.fetch(channelId).catch(() => null);
         if (channel) return channel;
@@ -3427,7 +3532,7 @@ function findRole(guild, key) {
 
 function channelMention(guild, key) {
     const store = readStore();
-    const channelId = store.created?.channels?.[key];
+    const channelId = CHANNEL_IDS[key] || store.created?.channels?.[key];
     const channel = channelId ? guild.channels.cache.get(channelId) : guild.channels.cache.find(item => item.name === CHANNEL_NAMES[key]);
     return channel ? `<#${channel.id}>` : `#${CHANNEL_NAMES[key] || key}`;
 }

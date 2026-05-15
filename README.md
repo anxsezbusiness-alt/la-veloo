@@ -2,6 +2,8 @@
 
 Standalone Railway/GitHub bot for the LA VELOO Brawl Stars community server.
 
+This version runs in existing-server mode: it uses fixed channel IDs and does not create or edit base roles, channels, categories, permissions, or server settings.
+
 ## Railway Variables
 
 ```env
@@ -36,6 +38,7 @@ Run `/setup-la-veloo` after inviting the bot to refresh all LA VELOO roles, chan
 ## Features
 
 - LA VELOO server setup
+- Existing-server mode with fixed LA VELOO channel IDs
 - Styled roles and categories
 - Public panels stay English by default; language menu shows a private translated copy only for the selecting member
 - Rule ticket and full get-started tutorial
@@ -52,6 +55,7 @@ Run `/setup-la-veloo` after inviting the bot to refresh all LA VELOO roles, chan
 - Stream waiting room and staff-only stream voice
 - Static writable-channel panels are resent silently every 5 minutes without deleting user-created cards
 - Bot startup refreshes roles/channels quietly without reposting panels
+- Server changes are bundled automatically into styled status posts in updates
 - Rules, support, get-started, cooperations, and ticket-info panels stay in place instead of being resent
 - Profile-rank screenshot panel with automatic fire reaction
 - Invite tracker logs joins and invite stats in bot-log
