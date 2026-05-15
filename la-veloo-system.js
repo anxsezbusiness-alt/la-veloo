@@ -39,7 +39,7 @@ const LANGUAGES = [
     { code: 'es', label: 'Español', emoji: '🇪🇸' },
     { code: 'it', label: 'Italiano', emoji: '🇮🇹' }
 ];
-const DEFAULT_PANEL_LANGUAGE = process.env.LA_DEFAULT_PANEL_LANGUAGE || 'en';
+const DEFAULT_PANEL_LANGUAGE = 'en';
 
 const XP_REWARDS = [
     { xp: 100, roleKey: 'activeMember' },
@@ -76,6 +76,7 @@ const ROLE_NAMES = {
     creator: '𝘊𝘳𝘦𝘢𝘵𝘰𝘳',
     verifiedCreator: '𝘝𝘦𝘳𝘪𝘧𝘪𝘦𝘥 𝘊𝘳𝘦𝘢𝘵𝘰𝘳',
     clubMember: '𝘊𝘭𝘶𝘣 𝘔𝘦𝘮𝘣𝘦𝘳',
+    og: '𝘖𝘎',
     activeMember: '𝘈𝘤𝘵𝘪𝘷𝘦 𝘔𝘦𝘮𝘣𝘦𝘳',
     trustedMember: '𝘛𝘳𝘶𝘴𝘵𝘦𝘥 𝘔𝘦𝘮𝘣𝘦𝘳',
     rankedPlayer: '𝘙𝘢𝘯𝘬𝘦𝘥 𝘗𝘭𝘢𝘺𝘦𝘳',
@@ -114,6 +115,7 @@ const ROLE_DEFINITIONS = [
     { key: 'creator', color: 0xec4899, hoist: true },
     { key: 'verifiedCreator', color: 0xf472b6, hoist: true },
     { key: 'clubMember', color: 0x22c55e, hoist: true },
+    { key: 'og', color: 0xf59e0b, hoist: true },
     { key: 'activeMember', color: 0x84cc16 },
     { key: 'trustedMember', color: 0x06b6d4 },
     { key: 'rankedPlayer', color: 0x38bdf8 },
@@ -283,7 +285,7 @@ function registerLaVelooSystem(client) {
 
         await registerSlashCommands(guild);
         if (AUTO_SETUP) {
-            await setupLaVeloo(guild, { postPanels: true }).catch(error => {
+            await setupLaVeloo(guild, { postPanels: false, quiet: true }).catch(error => {
                 console.error('[LA VELOO] Setup failed:', error.message);
             });
         }
@@ -343,6 +345,7 @@ function registerLaVelooSystem(client) {
             console.warn('[LA VELOO] Invite tracking failed:', error.message);
         });
         await addRole(member, 'member').catch(() => null);
+        await addOgRoleIfEligible(member).catch(() => null);
         await sendWelcomeDm(member).catch(() => null);
         const entrance = await getChannel(member.guild, 'entrance');
         await entrance?.send({
@@ -657,6 +660,9 @@ async function setupLaVeloo(guild, options = {}) {
     await assignMemberRoleToCurrentMembers(guild, roles.member).catch(error => {
         console.warn('[LA VELOO] Existing member role sync failed:', error.message);
     });
+    await assignOgRoleToFirstMembers(guild, roles.og).catch(error => {
+        console.warn('[LA VELOO] OG role sync failed:', error.message);
+    });
 
     await guild.edit({
         name: SERVER_NAME,
@@ -699,7 +705,9 @@ async function setupLaVeloo(guild, options = {}) {
         await postLaPanels(guild, channels);
     }
 
-    await staffLog(guild, 'Setup refreshed', 'LA VELOO roles, categories, channels, permissions, and panels were created or updated.');
+    if (!options.quiet) {
+        await staffLog(guild, 'Setup refreshed', 'LA VELOO roles, categories, channels, permissions, and panels were created or updated.');
+    }
     return { roles, channels };
 }
 
@@ -729,6 +737,36 @@ async function assignMemberRoleToCurrentMembers(guild, memberRole) {
         if (!member.user.bot && !member.roles.cache.has(memberRole.id)) {
             await member.roles.add(memberRole, 'LA VELOO member role sync').catch(() => null);
         }
+    }
+}
+
+async function assignOgRoleToFirstMembers(guild, ogRole) {
+    if (!ogRole) return;
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) return;
+
+    const firstHundred = [...members.values()]
+        .filter(member => !member.user.bot)
+        .sort((a, b) => (a.joinedTimestamp || 0) - (b.joinedTimestamp || 0))
+        .slice(0, 100);
+
+    for (const member of firstHundred) {
+        if (!member.roles.cache.has(ogRole.id)) {
+            await member.roles.add(ogRole, 'LA VELOO first 100 OG role').catch(() => null);
+        }
+    }
+}
+
+async function addOgRoleIfEligible(member) {
+    const ogRole = findRole(member.guild, 'og');
+    if (!ogRole || member.roles.cache.has(ogRole.id)) return;
+
+    const members = await member.guild.members.fetch().catch(() => null);
+    if (!members) return;
+
+    const humanMembers = [...members.values()].filter(candidate => !candidate.user.bot);
+    if (humanMembers.length <= 100) {
+        await member.roles.add(ogRole, 'LA VELOO first 100 OG role').catch(() => null);
     }
 }
 
@@ -1726,17 +1764,15 @@ async function handlePanelLanguageSelect(interaction) {
     const panelId = interaction.customId.replace('la_panel_lang_', '');
     const language = normalizePanelLanguage(interaction.values?.[0]);
 
-    const store = readStore();
-    store.panelLanguages ||= {};
-    store.panelLanguages[panelId] = language;
-    writeStore(store);
-
-    return interaction.update(localizedPanelPayload(panelId, language));
+    return interaction.reply({
+        ...localizedPanelPayload(panelId, language),
+        ephemeral: true,
+        allowedMentions: { parse: [] }
+    });
 }
 
 function getPanelLanguage(panelId) {
-    const store = readStore();
-    return normalizePanelLanguage(store.panelLanguages?.[panelId] || DEFAULT_PANEL_LANGUAGE);
+    return DEFAULT_PANEL_LANGUAGE;
 }
 
 function normalizePanelLanguage(language) {
@@ -3478,6 +3514,7 @@ function plainRoleLabel(key) {
         rankedPlayer: 'Ranked Player',
         teamPlayer: 'Team Player',
         clubMember: 'Club Member',
+        og: 'OG',
         lookingForMates: 'Looking For Mates',
         giveawayPing: 'Giveaway Ping',
         tournamentPing: 'Tournament Ping'

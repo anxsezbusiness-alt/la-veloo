@@ -10,7 +10,6 @@ GUILD_ID=1504515493950918756
 LA_VELOO_AUTO_SETUP=true
 LA_ENABLE_COMMUNITY=true
 LA_RULES_CHANNEL_ID=1504521850930073691
-LA_DEFAULT_PANEL_LANGUAGE=en
 LA_PANEL_REFRESH_MINUTES=5
 LA_MESSAGE_SNAPSHOT_EVERY=20
 LA_LIVE_MESSAGE_LOG=false
@@ -38,7 +37,7 @@ Run `/setup-la-veloo` after inviting the bot to refresh all LA VELOO roles, chan
 
 - LA VELOO server setup
 - Styled roles and categories
-- Multilingual panels: English, Deutsch, Français, Español, Italiano
+- Public panels stay English by default; language menu shows a private translated copy only for the selecting member
 - Rule ticket and full get-started tutorial
 - Support tickets with accept, decline, delete
 - Creator and cooperation applications
@@ -48,9 +47,11 @@ Run `/setup-la-veloo` after inviting the bot to refresh all LA VELOO roles, chan
 - Private mate-search channels and automatic 10k trophy bucket matching
 - Ranked matching for Bronze, Silver, Gold, Diamond, Mythic, Legendary, Master, Pro
 - Member role on join, welcome DM, and entrance join/leave log
+- OG role for the first 100 non-bot members
 - Community-only member posting permissions
 - Stream waiting room and staff-only stream voice
 - Static writable-channel panels are resent silently every 5 minutes without deleting user-created cards
+- Bot startup refreshes roles/channels quietly without reposting panels
 - Rules, support, get-started, cooperations, and ticket-info panels stay in place instead of being resent
 - Profile-rank screenshot panel with automatic fire reaction
 - Invite tracker logs joins and invite stats in bot-log
